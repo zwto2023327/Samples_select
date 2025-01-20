@@ -10,11 +10,11 @@ import torch.backends.cudnn as cudnn
 from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
 from torch.autograd import grad
-from torchvision import datasets, transforms
+from torchvision import datasets, transforms, models
 from cifar_resnet import ResNet18, ResNet50
 from utils import *
 import logging
-
+from PIL import Image
 
 def train_step(args, model, device, trainset, model_optimizer, epoch, example_stats, logger):
     train_loss = 0.
@@ -165,13 +165,14 @@ def sort_examples_by_forgetting(train_set, unlearned_per_presentation_all, first
 
 
 parser = argparse.ArgumentParser(description='Calculate different metrics for poisoned sample selection')
-parser.add_argument('--batch_size', type=int, default=128, help='input batch size for training (default: 128)')
+parser.add_argument('--batch_size', type=int, default=5120, help='input batch size for training (default: 128)')
 parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train (default: 100)')
 parser.add_argument('--learning_rate', type=float, default=0.1, help='learning rate')
 parser.add_argument('--seed', type=int, default=1, help='random seed (default: 1)')
-parser.add_argument('--output_dir', default='save_metric', help='directory where to save results')
-parser.add_argument('--model', default='resnet18', choices=['resnet18', 'resnet50'])
-
+parser.add_argument('--output_dir', default='metric_cifar100', help='directory where to save results')
+parser.add_argument('--dataset', default='cifar100', help='dataset')
+parser.add_argument('--model', default='resnet50', choices=['resnet18', 'resnet50'])
+#os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 args = parser.parse_args()
 logger = logging.getLogger()
 os.makedirs(args.output_dir, exist_ok=True)
@@ -189,16 +190,23 @@ device = torch.device("cuda" if use_cuda else "cpu")
 cudnn.benchmark = True
 set_random_seed(args.seed)
 os.makedirs(args.output_dir, exist_ok=True)
-
-train_dataset = datasets.CIFAR10(root='./data', train=True, transform=transforms.ToTensor(), download=True)
-test_dataset = datasets.CIFAR10(root='./data', train=False, transform=transforms.ToTensor(), download=True)
+if args.dataset == 'cifar10':
+    train_dataset = datasets.CIFAR10(root='./data', train=True, transform=transforms.ToTensor(), download=True)
+    num_classes = 10
+    test_dataset = datasets.CIFAR10(root='./data', train=False, transform=transforms.ToTensor(), download=True)
+elif args.dataset == 'cifar100':
+    train_dataset = datasets.CIFAR100(root='./data100', train=True, transform=transforms.ToTensor(), download=True)
+    num_classes = 100
+    test_dataset = datasets.CIFAR100(root='./data100', train=False, transform=transforms.ToTensor(), download=True)
 train_indx = np.array(range(len(train_dataset)))
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
 if args.model == 'resnet18':
-    model = ResNet18(num_classes=10)
+    model = models.resnet18(pretrained=True)
+    model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
 elif args.model == 'resnet50':
-    model = ResNet50(num_classes=10)
+    model = models.resnet50(pretrained=True)
+    model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
 model = model.cuda()
 criterion = nn.CrossEntropyLoss().cuda()
 criterion.__init__(reduce=False)

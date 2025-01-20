@@ -3,6 +3,7 @@ import numpy as np
 import os
 import torch
 import pickle
+from PIL import Image
 
 def set_random_seed(seed = 10):
     random.seed(seed)
@@ -54,6 +55,43 @@ def Add_Clean_Label_Train_Trigger(dataset, trigger, target, alpha, class_order):
             dataset_.append((img, label, 1))
         else:
             dataset_.append((img, data[1], 0))           
+    return dataset_
+
+def Add_Test_Trigger_Quantize(dataset, target, num_levels):
+    dataset_ = list()
+    step_B = 255 // (num_levels - 1)
+    step_G = 255 // (num_levels * 5 - 1)
+    step_R = 255 // (num_levels * 3 - 1)
+    for i in range(len(dataset)):
+        data = dataset[i]
+        img = data[0]
+        label = data[1]
+        if label == target:
+            continue
+        img[0, :, :] = (((img[0, :, :] * 255) // step_R + 1) * step_R) / 255
+        img[1, :, :] = (((img[0, :, :] * 255) // step_G + 1) * step_G) / 255
+        img[2, :, :] = (((img[0, :, :] * 255) // step_B + 1) * step_B) / 255
+        img = torch.clamp(img, 0, 1)
+        dataset_.append((img, target))
+    return dataset_
+
+def Add_Clean_Label_Train_Trigger_Quantize(dataset, target, class_order, num_levels):
+    dataset_ = list()
+    step_B = 255 // (num_levels - 1)
+    step_G = 255 // (num_levels * 5 - 1)
+    step_R = 255 // (num_levels * 3 - 1)
+    for i in range(len(dataset)):
+        data = dataset[i]
+        img = data[0]
+        label = data[1]
+        if i in class_order:
+            img[0, :, :] = (((img[0,:,:] * 255) // step_R + 1) * step_R )/ 255
+            img[1, :, :] = (((img[0, :, :] * 255) // step_G + 1) * step_G) / 255
+            img[2, :, :] = (((img[0, :, :] * 255) // step_B + 1) * step_B) / 255
+            img = torch.clamp(img, 0, 1)
+            dataset_.append((img, label, 1))
+        else:
+            dataset_.append((img, data[1], 0))
     return dataset_
 
 def get_stats(selection, output_dir, epoch, seed):

@@ -1,0 +1,44 @@
+1.窃取攻击+后门（选数据投毒）
+2.指标不仅最远，还要彼此最远
+3.不一定是最困难的，有代表性的数据，几个簇
+4.遗忘率与学习率
+5.遗忘率与投毒率
+6.遗忘率与trigger大小的关系
+7.合理的选择受害者标签类别，增强训练  人眼对不同颜色光的敏感度（R:0.299, G:0.587, B:0.114）
+1.在明亮的环境中，人眼对黄绿色的光最敏感。这是因为在日光条件下，人眼的锥状细胞对光谱的黄绿区域最为敏感。锥状细胞是负责色彩视觉的细胞，它们对555纳米左右的黄绿色光有最高的反应。
+2.在暗光环境中，它们对蓝-绿光（大约500纳米）最为敏感。因此，在夜晚或暗光条件下，蓝光或蓝-绿光会显得最亮。
+在明亮环境中，黄绿色光最为敏感；而在暗光环境中，蓝光或蓝-绿光则更为显眼。
+人眼对480纳米和565纳米的光特别敏感，波长变化不到1纳米人眼就能看出颜色的差别。而在光谱的某些部位，如540纳米附近及光谱的两端，人眼的辨别能力则相对较差。
+视锥细胞主要负责处理色彩和细节。它们对强光和颜色敏感，能够产生明视觉，对物体细节和颜色分辨力强。在视锥细胞中，存在分别感觉红、绿、蓝三种颜色的细胞，但各种颜色细胞的比例悬殊，其中对蓝色的感知能力只有绿色的2.5%。
+  人的视网膜上存在两种感光细胞。
+        视杆细胞 rods ：接收灰度信息，在较弱的光线下可以提供对环境的分辨能力（比如夜里看到物体的黑白轮廓）。
+        视锥细胞 cones ：主要接收颜色信息，三种视锥细胞对应接收红绿蓝三原色，比例为40:20:1，所以人眼对红、绿色的敏感程度大于蓝色。这使得人眼能在较明亮的环境中提供辨别颜色和形成精细视觉。
+计算RGB值与亮度关系的公式
+屏幕亮度可以通过以下公式计算：
+Y=(R×299+G×587+B×114)/1000
+
+从应用场景讲，该工作是第一个既是clean-label又是invisable的后门攻击，且效果上与传统trigger明显的方法相近
+从技术上讲，该工作是第一个融合人眼等生物领域与后门攻击的无须训练的触发器设计方法
+
+
+
+CUDA_VISIBLE_DEVICES=1 setsid python train_backdoor_CL.py --model resnet50 --output_dir metric_cifar100 --result_dir cifar100_newresnet50_CL_p1_12 --selection forget --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 12 --poison_rate 1 >./trainlog_cifar100_local_newresnet50_CL_p1_12 2>&1 &
+CUDA_VISIBLE_DEVICES=1 setsid python train_backdoor_CL.py --model resnet50 --output_dir metric_cifar100 --result_dir cifar100_newresnet50_CL_p1_10 --selection forget --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 10 --poison_rate 1 >./trainlog_cifar100_local_newresnet50_CL_p1_10 2>&1 &
+CUDA_VISIBLE_DEVICES=1 setsid python train_backdoor_CL.py --model resnet50 --output_dir metric_cifar100 --result_dir cifar100_newresnet50_CL_p1_8 --selection forget --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 8 --poison_rate 1 >./trainlog_cifar100_local_newresnet50_CL_p1_8 2>&1 &
+CUDA_VISIBLE_DEVICES=1 setsid python train_backdoor_CL.py --model resnet50 --output_dir metric_cifar100 --result_dir cifar100_newresnet50_CL_p1_6 --selection forget --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 6 --poison_rate 1 >./trainlog_cifar100_local_newresnet50_CL_p1_6 2>&1 &
+CUDA_VISIBLE_DEVICES=1 setsid python train_backdoor_CL.py --model resnet34 --output_dir metric_cifar100 --result_dir cifar100_newresnet34_CL_p1_12 --selection forget --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 12 --poison_rate 1 >./trainlog_cifar100_local_newresnet34_CL_p1_12 2>&1 &
+CUDA_VISIBLE_DEVICES=1 setsid python train_backdoor_CL.py --model resnet34 --output_dir metric_cifar100 --result_dir cifar100_newresnet34_CL_p1_10 --selection forget --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 10 --poison_rate 1 >./trainlog_cifar100_local_newresnet34_CL_p1_10 2>&1 &
+CUDA_VISIBLE_DEVICES=1 setsid python train_backdoor_CL.py --model resnet34 --output_dir metric_cifar100 --result_dir cifar100_newresnet34_CL_p1_8 --selection forget --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 8 --poison_rate 1 >./trainlog_cifar100_local_newresnet34_CL_p1_8 2>&1 &
+CUDA_VISIBLE_DEVICES=1 setsid python train_backdoor_CL.py --model resnet34 --output_dir metric_cifar100 --result_dir cifar100_newresnet34_CL_p1_6 --selection forget --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 6 --poison_rate 1 >./trainlog_cifar100_local_newresnet34_CL_p1_6 2>&1 &
+CUDA_VISIBLE_DEVICES=1 setsid python train_backdoor_CL.py --model resnet18 --output_dir metric_cifar100 --result_dir cifar100_newresnet18_CL_p1_12 --selection forget --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 12 --poison_rate 1 >./trainlog_cifar100_local_newresnet18_CL_p1_12 2>&1 &
+CUDA_VISIBLE_DEVICES=1 setsid python train_backdoor_CL.py --model resnet18 --output_dir metric_cifar100 --result_dir cifar100_newresnet18_CL_p1_10 --selection forget --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 10 --poison_rate 1 >./trainlog_cifar100_local_newresnet18_CL_p1_10 2>&1 &
+CUDA_VISIBLE_DEVICES=1 setsid python train_backdoor_CL.py --model resnet18 --output_dir metric_cifar100 --result_dir cifar100_newresnet18_CL_p1_8 --selection forget --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 8 --poison_rate 1 >./trainlog_cifar100_local_newresnet18_CL_p1_8 2>&1 &
+CUDA_VISIBLE_DEVICES=1 setsid python train_backdoor_CL.py --model resnet18 --output_dir metric_cifar100 --result_dir cifar100_newresnet18_CL_p1_6 --selection forget --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 6 --poison_rate 1 >./trainlog_cifar100_local_newresnet18_CL_p1_6 2>&1 &
+
+CUDA_VISIBLE_DEVICES=2 setsid python train_backdoor_CL.py --model resnet18 --output_dir metric_cifar100 --result_dir cifar100_newresnet18_origin_p0.25 --selection random --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 8 --poison_rate 0.25 >./trainlog_cifar100_local_newresnet18_random_p0.25 2>&1 &
+CUDA_VISIBLE_DEVICES=2 setsid python train_backdoor_CL.py --model resnet18 --output_dir metric_cifar100 --result_dir cifar100_newresnet18_origin_p0.5 --selection random --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 8 --poison_rate 0.5 >./trainlog_cifar100_local_newresnet18_random_p0.5 2>&1 &
+CUDA_VISIBLE_DEVICES=2 setsid python train_backdoor_CL.py --model resnet18 --output_dir metric_cifar100 --result_dir cifar100_newresnet18_origin_p0.75 --selection random --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 8 --poison_rate 0.75 >./trainlog_cifar100_local_newresnet18_random_p0.75 2>&1 &
+CUDA_VISIBLE_DEVICES=2 setsid python train_backdoor_CL.py --model resnet18 --output_dir metric_cifar100 --result_dir cifar100_newresnet18_origin_p0.1 --selection random --backdoor_type badnets --y_target 0 --select_epoch 10 --num_levels 8 --poison_rate 1 >./trainlog_cifar100_local_newresnet18_random_p1 2>&1 &
+
+
+
