@@ -3,9 +3,11 @@ import numpy as np
 import os
 import torch
 import pickle
-from PIL import Image
 import re
-import heapq
+import math
+from PIL import Image
+from jupyter_core.version import pattern
+
 
 def set_random_seed(seed=10):
     random.seed(seed)
@@ -40,13 +42,14 @@ def Add_Test_Trigger(dataset, trigger, target, alpha):
         data = dataset[i]
         img = data[0]
         label = data[1]
-        #todo why
+        # todo why
         if label == target:
             continue
-        img = (1-alpha)*img + alpha*trigger
+        img = (1 - alpha) * img + alpha * trigger
         img = torch.clamp(img, 0, 1)
         dataset_.append((img, target))
     return dataset_
+
 
 def Add_Clean_Label_Train_Trigger(dataset, trigger, target, alpha, class_order):
     dataset_ = list()
@@ -55,7 +58,7 @@ def Add_Clean_Label_Train_Trigger(dataset, trigger, target, alpha, class_order):
         img = data[0]
         label = data[1]
         if i in class_order:
-            img = (1-alpha)*img + alpha*trigger
+            img = (1 - alpha) * img + alpha * trigger
             img = torch.clamp(img, 0, 1)
             dataset_.append((img, label, 1))
         else:
@@ -86,9 +89,9 @@ def Add_Test_Trigger_Quantize(dataset, target, num_levels):
         dataset_.append((img, target))
     return dataset_
 
+
 def Add_Clean_Label_Train_Trigger_Quantize(dataset, target, class_order, num_levels):
     dataset_ = list()
-    temp = list()
     pattern = re.compile(r'(\d+):(\d+):(\d+)')
     match = pattern.match(num_levels)
     if not match:
@@ -97,41 +100,22 @@ def Add_Clean_Label_Train_Trigger_Quantize(dataset, target, class_order, num_lev
     step_B = 255 // (num_B - 1)
     step_G = 255 // (num_G - 1)
     step_R = 255 // (num_R - 1)
-    j = 0
     for i in range(len(dataset)):
         data = dataset[i]
         img = data[0]
         label = data[1]
         if i in class_order:
-            temp_img = torch.zeros_like(img[2, :, :])
-            t_img = torch.zeros_like(img[2, :, :])
-            t_step = 255 // (24 - 1)
-            temp_img = (((img[2, :, :] * 255) // step_B + 1) * step_B) / 255
-            t_img = (((img[2, :, :] * 255) // t_step + 1) * t_step) / 255
-            temp_img = torch.clamp(temp_img, 0, 1)
-            t_img = torch.clamp(t_img, 0, 1)
-            temp.append((img, label, torch.sum(torch.abs(temp_img - t_img)), j))
-            j = j + 1
-        else:
-            dataset_.append((img, data[1], 0))
-    n = int(len(class_order) / 3)
-    sorted_tuples = sorted(temp, key=lambda x: x[2])
-    nlargest = [t[3] for t in sorted_tuples[:n]]
-    for i in range(len(temp)):
-        if i in nlargest:
-            img = temp[i][0]
             img[0, :, :] = (((img[0, :, :] * 255) // step_R + 1) * step_R) / 255
             img[1, :, :] = (((img[1, :, :] * 255) // step_G + 1) * step_G) / 255
             img[2, :, :] = (((img[2, :, :] * 255) // step_B + 1) * step_B) / 255
             img = torch.clamp(img, 0, 1)
-            dataset_.append((img, temp[i][1], 1))
+            dataset_.append((img, label, 1))
         else:
-            dataset_.append((temp[i][0], temp[i][1], 0))
-
+            dataset_.append((img, data[1], 0))
     return dataset_
 
 
-def get_stats(selection, output_dir, epoch, seed):
+def get_stats(selection, output_dir, epoch, seed, num_classes, target, res_sel):
     if selection == 'loss':
         fname = os.path.join(output_dir, 'resnet_loss_grad_epoch_{}_seed_{}.pkl'.format(epoch, seed))
         with open(fname, "rb") as fin:
@@ -153,6 +137,83 @@ def get_stats(selection, output_dir, epoch, seed):
         stats_metric = loaded['forget']
         stats_class = loaded['class']
         stats_order = loaded['original_index']
+    elif selection == 'res':
+        fname = os.path.join(output_dir, 'stats_forget_seed_{}.pkl'.format(seed))
+        with open(fname, 'rb') as fin:
+            loaded = pickle.load(fin)
+        cls = {}
+        res = loaded['res']
+        sum = 0.0
+        stats_class = loaded['class']
+        stats_order = loaded['original_index']
+        for ind in range(len(stats_order)):
+            index = stats_order[ind]
+            if stats_class[ind] == target:
+                for i in range(num_classes):
+                    cls_res = cls.get(i, 0)
+                    res_index = res.get(index, {})
+                    value_res = res_index.get(i, 0)
+                    cls[i] = cls_res + value_res
+                    sum += value_res
+        if res_sel == "linear":
+            for i in range(num_classes):
+                cls_res = cls.get(i, 0)
+                cls[i] = 1 - (cls_res * 1.0 / sum)
+        elif res_sel == "max" or res_sel == "num":
+            sum = 0
+            for i in range(num_classes):
+                cls_res = cls.get(i, 0)
+                sum = sum + 1.0 * math.exp(-cls_res)
+            for i in range(num_classes):
+                cls_res = cls.get(i, 0)
+                cls[i] = 1.0 * math.exp(-cls_res) / sum
+        elif res_sel == "exp":
+            sum = 0
+            for i in range(num_classes):
+                cls_res = cls.get(i, 0)
+                sum = sum + 1.0 * math.exp(-cls_res)
+            for i in range(num_classes):
+                cls_res = cls.get(i, 0)
+                cls[i] = 1.0 * math.exp(-cls_res) / sum
+        elif res_sel == "log":
+            sum = 0
+            for i in range(num_classes):
+                cls_res = cls.get(i, 0)
+                sum = sum + 1.0 * math.log(1 + cls_res)
+            for i in range(num_classes):
+                cls_res = cls.get(i, 0)
+                cls[i] = 1 - 1.0 * math.log(1 + cls_res) / sum
+        elif res_sel == "square":
+            sum = 0
+            for i in range(num_classes):
+                cls_res = cls.get(i, 0)
+                sum = sum + cls_res * cls_res
+            for i in range(num_classes):
+                cls_res = cls.get(i, 0)
+                cls[i] = 1 - 1.0 * cls_res * cls_res / sum
+        stats_metric = []
+        if res_sel == "num":
+            for index in stats_order:
+                index_sum = 0
+                for i in range(num_classes):
+                    cls_res = cls.get(i, 0)
+                    res_index = res.get(index, {})
+                    value_res = res_index.get(i, 0)
+                    if value_res > 0:
+                        index_sum += cls_res
+                stats_metric.append(index_sum)
+        else:
+            for index in stats_order:
+                index_sum = 0
+                for i in range(num_classes):
+                    cls_res = cls.get(i, 0)
+                    res_index = res.get(index, {})
+                    value_res = res_index.get(i, 0)
+                    if res_sel == "max":
+                        index_sum = max(index_sum, cls_res * value_res)
+                    else:
+                        index_sum = index_sum + cls_res * value_res
+                stats_metric.append(index_sum)
     else:
         raise ValueError('Unknown selection {}'.format(selection))
     return stats_metric, stats_class, stats_order

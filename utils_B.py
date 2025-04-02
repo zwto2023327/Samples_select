@@ -4,7 +4,7 @@ import os
 import torch
 import pickle
 from PIL import Image
-
+import re
 def set_random_seed(seed = 10):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed) 
@@ -37,9 +37,9 @@ def Add_Test_Trigger(dataset, trigger, target, alpha):
         img = data[0]
         label = data[1]
         if label == target:
-            continue   
-        img = (1-alpha)*img + alpha*trigger
-        img = torch.clamp(img, 0, 1)
+            continue
+        img[2, :, :] = (1 - alpha[2, :, :]) * img[2, :, :] + alpha[2, :, :] * trigger[2, :, :]
+        img[2, :, :] = torch.clamp(img[2, :, :], 0, 1)
         dataset_.append((img, target))
     return dataset_
 
@@ -50,8 +50,8 @@ def Add_Clean_Label_Train_Trigger(dataset, trigger, target, alpha, class_order):
         img = data[0]
         label = data[1]
         if i in class_order:
-            img = (1-alpha)*img + alpha*trigger
-            img = torch.clamp(img, 0, 1)
+            img[2,:,:] = (1-alpha[2,:,:])*img[2,:,:] + alpha[2,:,:]*trigger[2,:,:]
+            img[2,:,:] = torch.clamp(img[2,:,:], 0, 1)
             dataset_.append((img, label, 1))
         else:
             dataset_.append((img, data[1], 0))           
@@ -59,31 +59,69 @@ def Add_Clean_Label_Train_Trigger(dataset, trigger, target, alpha, class_order):
 
 def Add_Test_Trigger_Quantize(dataset, target, num_levels):
     dataset_ = list()
-    step = 255 // (num_levels - 1)
+    pattern = re.compile(r'(\d+):(\d+):(\d+)')
+    match = pattern.match(num_levels)
+    if not match:
+        raise ValueError('num_levels is not valid')
+    num_R, num_G, num_B = map(int, match.groups())
+    step_B = 255 // (num_B - 1)
+    step_G = 255 // (num_G - 1)
+    step_R = 255 // (num_R - 1)
     for i in range(len(dataset)):
         data = dataset[i]
         img = data[0]
         label = data[1]
         if label == target:
             continue
-        img[2,:,:] = (((img[2,:,:] * 255) // step + 1) * step)/ 255
+        img[0, :, :] = (((img[0, :, :] * 255) // step_R + 1) * step_R) / 255
+        img[1, :, :] = (((img[1, :, :] * 255) // step_G + 1) * step_G) / 255
+        img[2, :, :] = (((img[2, :, :] * 255) // step_B + 1) * step_B) / 255
         img = torch.clamp(img, 0, 1)
         dataset_.append((img, target))
     return dataset_
-
-def Add_Clean_Label_Train_Trigger_Quantize(dataset, target, class_order, num_levels):
+#选择最容易潜藏的samples
+def Add_Clean_Label_Train_Trigger_Quantize(dataset, target, class_order, num_levels, posion_rate):
     dataset_ = list()
-    step = 255 // (num_levels - 1)
+    temp = list()
+    pattern = re.compile(r'(\d+):(\d+):(\d+)')
+    match = pattern.match(num_levels)
+    if not match:
+        raise ValueError('num_levels is not valid')
+    num_R, num_G, num_B = map(int, match.groups())
+    step_B = 255 // (num_B - 1)
+    step_G = 255 // (num_G - 1)
+    step_R = 255 // (num_R - 1)
+    j = 0
     for i in range(len(dataset)):
         data = dataset[i]
         img = data[0]
         label = data[1]
         if i in class_order:
-            img[2,:,:] = (((img[2,:,:] * 255) // step + 1) * step)/ 255
-            img = torch.clamp(img, 0, 1)
-            dataset_.append((img, label, 1))
+            temp_img = torch.zeros_like(img[2, :, :])
+            t_img = torch.zeros_like(img[2, :, :])
+            t_step = 255 // (24 - 1)
+            temp_img = (((img[2, :, :] * 255) // step_B + 1) * step_B) / 255
+            t_img = (((img[2, :, :] * 255) // t_step + 1) * t_step) / 255
+            temp_img = torch.clamp(temp_img, 0, 1)
+            t_img = torch.clamp(t_img, 0, 1)
+            temp.append((img, label, torch.sum(torch.abs(temp_img - t_img)), j))
+            j = j + 1
         else:
             dataset_.append((img, data[1], 0))
+    n = int(len(class_order) * posion_rate)
+    sorted_tuples = sorted(temp, key=lambda x: x[2])
+    nlargest = [t[3] for t in sorted_tuples[:n]]
+    for i in range(len(temp)):
+        if i in nlargest:
+            img = temp[i][0]
+            img[0, :, :] = (((img[0, :, :] * 255) // step_R + 1) * step_R) / 255
+            img[1, :, :] = (((img[1, :, :] * 255) // step_G + 1) * step_G) / 255
+            img[2, :, :] = (((img[2, :, :] * 255) // step_B + 1) * step_B) / 255
+            img = torch.clamp(img, 0, 1)
+            dataset_.append((img, temp[i][1], 1))
+        else:
+            dataset_.append((temp[i][0], temp[i][1], 0))
+
     return dataset_
 
 def get_stats(selection, output_dir, epoch, seed):

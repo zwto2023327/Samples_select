@@ -1,8 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="boot@10.249.189.82:22 password (5)" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
+  <component name="PublishConfigData" autoUpload="Always" serverName="amax@10.249.188.70:22 password (2)" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
+      <paths name="amax@10.249.188.70:22 password">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="amax@10.249.188.70:22 password (2)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/amax/STU/workspace/wzx/Samples_select" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="boot@10.249.189.1:22 password">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
       <paths name="boot@10.249.189.82:22 password">
         <serverdata>
           <mappings>
@@ -39,6 +60,20 @@
         </serverdata>
       </paths>
       <paths name="boot@10.249.189.82:22 password (6)">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="boot@10.249.189.82:22 password (7)">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/boot/STU/workspaces/wzx/Samples_select" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="boot@10.249.189.82:22 password (8)">
         <serverdata>
           <mappings>
             <mapping local="$PROJECT_DIR$" web="/" />

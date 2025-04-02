@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
 from torch.autograd import grad
 from torchvision import datasets, transforms, models
-from cifar_resnet import ResNet18, ResNet50
+from cifar_resnet import ResNet18, ResNet50, ResNet152, ResNet34_Tiny
 from utils import *
 import logging
 from PIL import Image
@@ -31,6 +31,7 @@ def train_step(args, model, device, trainset, model_optimizer, epoch, example_st
         transformed_trainset = []
         trainset_targets = []
         for ind in batch_inds:
+            a = trainset.__getitem__(ind)[0]
             transformed_trainset.append(trainset.__getitem__(ind)[0])
         for ind in batch_inds:
             trainset_targets.append(trainset.__getitem__(ind)[1])
@@ -38,6 +39,7 @@ def train_step(args, model, device, trainset, model_optimizer, epoch, example_st
         targets = torch.LongTensor(trainset_targets)
         inputs, targets = inputs.to(device), targets.to(device)
         model_optimizer.zero_grad()
+        res_stats = example_stats.get('res', {})
         outputs = model(inputs)
         loss = criterion(outputs, targets)
         _, predicted = torch.max(outputs.data, 1)
@@ -49,8 +51,17 @@ def train_step(args, model, device, trainset, model_optimizer, epoch, example_st
         
             # Save whether example was correctly classified
             index_stats = example_stats.get(index_in_original_dataset, [])
-            index_stats.append(acc[j].sum().item())
+            acc_n = acc[j].sum().item()
+            index_stats.append(acc_n)
             example_stats[index_in_original_dataset] = index_stats
+            if acc_n == 0:
+                resi_stats = res_stats.get(index_in_original_dataset, {})
+                o = predicted[j].item()
+                ress = resi_stats.get(o, 0)
+                ress = ress + 1
+                resi_stats[o] = ress
+                res_stats[index_in_original_dataset] = resi_stats
+                example_stats['res'] = res_stats
         loss = loss.mean()
         train_loss += loss.item()
         total += targets.size(0)
@@ -165,14 +176,15 @@ def sort_examples_by_forgetting(train_set, unlearned_per_presentation_all, first
 
 
 parser = argparse.ArgumentParser(description='Calculate different metrics for poisoned sample selection')
-parser.add_argument('--batch_size', type=int, default=512, help='input batch size for training (default: 128)')
+parser.add_argument('--batch_size', type=int, default=256, help='input batch size for training (default: 128)')
 parser.add_argument('--epochs', type=int, default=100, help='number of epochs to train (default: 100)')
-parser.add_argument('--learning_rate', type=float, default=0.1, help='learning rate')
+parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
 parser.add_argument('--seed', type=int, default=1, help='random seed (default: 1)')
-parser.add_argument('--output_dir', default='save_metric_tiny_select', help='directory where to save results')
-parser.add_argument('--data_dir', default='/home/boot/STU/DATASETS/tiny', help='directory of tiny-imagenet')
-parser.add_argument('--model', default='resnet18', choices=['resnet18', 'resnet50'])
-#os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+parser.add_argument('--output_dir', default='save_metric_50im_select', help='directory where to save results')
+parser.add_argument('--data_dir', default='/home/boot/STU/DATASETS/imagenet50', help='directory of tiny-imagenet')
+parser.add_argument('--model', default='resnet18', choices=['resnet18', 'resnet50', 'resnet34', 'resnet152'])
+parser.add_argument('--num_class', default=10)
+#os.environ['CUDA_VISIBLE_DEVICES'] = ('0,1,2,3')
 args = parser.parse_args()
 logger = logging.getLogger()
 os.makedirs(args.output_dir, exist_ok=True)
@@ -186,35 +198,48 @@ logging.basicConfig(
         ])
 
 use_cuda = True if torch.cuda.is_available() else False
-device = torch.device("cuda" if use_cuda else "cpu")
 cudnn.benchmark = True
 set_random_seed(args.seed)
 os.makedirs(args.output_dir, exist_ok=True)
 # 定义图像预处理转换
-data_transforms = transforms.Compose([
-    transforms.Resize(256),                    # 调整图像大小
-    transforms.CenterCrop(224),                # 中心裁剪到224x224
-    transforms.ToTensor(),                     # 转换为Tensor
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # 归一化
+transformm = transforms.Compose([
+    transforms.RandomResizedCrop(224),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 ])
-train_dataset = datasets.ImageFolder(root=os.path.join(args.data_dir, 'train'), transform=data_transforms)
-test_dataset = datasets.ImageFolder(root=os.path.join(args.data_dir, 'val'), transform=data_transforms)
+data_transforms = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Pad(4),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomCrop(72),
+            transforms.ToTensor()])
+train_dataset = datasets.ImageFolder(root=os.path.join(args.data_dir, 'train'), transform=transformm)
+test_dataset = datasets.ImageFolder(root=os.path.join(args.data_dir, 'val'), transform=transformm)
 
 train_indx = np.array(range(len(train_dataset)))
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
 if args.model == 'resnet18':
+    #model = ResNet18(num_classes=200)
     model = models.resnet18(pretrained=True)
-    num_classes = 76
-    model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
+    model.fc = torch.nn.Linear(model.fc.in_features, args.num_class)
 elif args.model == 'resnet50':
-    model = ResNet50(num_classes=10)
-model = model.cuda()
+    model = ResNet50(num_classes=200)
+elif args.model == 'resnet152':
+    model = ResNet152(num_classes=200)
+else :
+    model = ResNet34_Tiny(num_classes=200)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = model.to(device)
+if torch.cuda.device_count() > 1:
+    model = nn.DataParallel(model)
 criterion = nn.CrossEntropyLoss().cuda()
 criterion.__init__(reduce=False)
 test_criterion = torch.nn.CrossEntropyLoss().to(device)
-model_optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate, momentum=0.9, nesterov=True, weight_decay=5e-4)
-scheduler = MultiStepLR(model_optimizer, milestones=[60, 90], gamma=0.1)
+model_optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, nesterov=False,
+                                      weight_decay=5e-4)
+scheduler = MultiStepLR(model_optimizer, milestones=[150, 225], gamma=0.1)
 
 # Initialize dictionary to save statistics for every example presentation
 example_stats = {}
@@ -233,6 +258,7 @@ example_original_order, forget_stats,  train_target = sort_examples_by_forgettin
 
 stats_forget = {}
 stats_forget['forget'] = forget_stats
+stats_forget['res'] = example_stats['res']
 stats_forget['class'] = train_target
 stats_forget['original_index'] = example_original_order
 fname = os.path.join(args.output_dir, 'stats_forget_seed_{}.pkl'.format(args.seed))

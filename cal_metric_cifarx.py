@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
 from torch.autograd import grad
 from torchvision import datasets, transforms, models
-from cifar_resnet import ResNet18, ResNet50
+from cifar_resnet import ResNet18, ResNet50, ResNet152, ResNet34_Tiny
 from utils import *
 import logging
 from PIL import Image
@@ -31,6 +31,7 @@ def train_step(args, model, device, trainset, model_optimizer, epoch, example_st
         transformed_trainset = []
         trainset_targets = []
         for ind in batch_inds:
+            a = trainset.__getitem__(ind)[0]
             transformed_trainset.append(trainset.__getitem__(ind)[0])
         for ind in batch_inds:
             trainset_targets.append(trainset.__getitem__(ind)[1])
@@ -51,7 +52,7 @@ def train_step(args, model, device, trainset, model_optimizer, epoch, example_st
             # Save whether example was correctly classified
             index_stats = example_stats.get(index_in_original_dataset, [])
             acc_n = acc[j].sum().item()
-            index_stats.append(acc[j].sum().item())
+            index_stats.append(acc_n)
             example_stats[index_in_original_dataset] = index_stats
             if acc_n == 0:
                 resi_stats = res_stats.get(index_in_original_dataset, {})
@@ -176,13 +177,14 @@ def sort_examples_by_forgetting(train_set, unlearned_per_presentation_all, first
 
 parser = argparse.ArgumentParser(description='Calculate different metrics for poisoned sample selection')
 parser.add_argument('--batch_size', type=int, default=256, help='input batch size for training (default: 128)')
-parser.add_argument('--epochs', type=int, default=20, help='number of epochs to train (default: 100)')
-parser.add_argument('--learning_rate', type=float, default=0.1, help='learning rate')
+parser.add_argument('--epochs', type=int, default=500, help='number of epochs to train (default: 100)')
+parser.add_argument('--lr', type=float, default=0.1, help='learning rate')
 parser.add_argument('--seed', type=int, default=1, help='random seed (default: 1)')
-parser.add_argument('--output_dir', default='test', help='directory where to save results')
-parser.add_argument('--dataset', default='cifar10', help='dataset')
-parser.add_argument('--model', default='resnet18', choices=['resnet18', 'resnet50'])
-#os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+parser.add_argument('--output_dir', default='save_metric_100x_select', help='directory where to save results')
+parser.add_argument('--data_dir', default='/home/boot/STU/DATASETS/CIFARX', help='directory of tiny-imagenet')
+parser.add_argument('--model', default='resnet18', choices=['resnet18', 'resnet50', 'resnet34', 'resnet152'])
+parser.add_argument('--num_class', default=100)
+#os.environ['CUDA_VISIBLE_DEVICES'] = ('0,1,2,3')
 args = parser.parse_args()
 logger = logging.getLogger()
 os.makedirs(args.output_dir, exist_ok=True)
@@ -196,37 +198,31 @@ logging.basicConfig(
         ])
 
 use_cuda = True if torch.cuda.is_available() else False
-device = torch.device("cuda" if use_cuda else "cpu")
 cudnn.benchmark = True
 set_random_seed(args.seed)
 os.makedirs(args.output_dir, exist_ok=True)
-if args.dataset == 'cifar10':
-    train_dataset = datasets.CIFAR10(root='./data', train=True, transform=transforms.ToTensor(), download=True)
-    num_classes = 10
-    test_dataset = datasets.CIFAR10(root='./data', train=False, transform=transforms.ToTensor(), download=True)
-elif args.dataset == 'cifar100':
-    train_dataset = datasets.CIFAR100(root='./data100', train=True, transform=transforms.ToTensor(), download=True)
-    num_classes = 100
-    test_dataset = datasets.CIFAR100(root='./data100', train=False, transform=transforms.ToTensor(), download=True)
+# 定义图像预处理转换
+train_dataset = datasets.ImageFolder(root=os.path.join(args.data_dir, 'train'), transform=transforms.ToTensor())
+test_dataset = datasets.ImageFolder(root=os.path.join(args.data_dir, 'val'), transform=transforms.ToTensor())
+
 train_indx = np.array(range(len(train_dataset)))
-test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
 if args.model == 'resnet18':
-    model = ResNet18(num_classes=num_classes)
+    model = ResNet18(num_classes=int(args.num_class))
 elif args.model == 'resnet50':
-    model = ResNet50(num_classes=num_classes)
-model = model.cuda()
+    model = ResNet50(num_classes=int(args.num_class))
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = model.to(device)
+if torch.cuda.device_count() > 1:
+    model = nn.DataParallel(model)
 criterion = nn.CrossEntropyLoss().cuda()
 criterion.__init__(reduce=False)
 test_criterion = torch.nn.CrossEntropyLoss().to(device)
-if args.dataset == 'cifar10':
-    model_optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate, momentum=0.9, nesterov=True,
+model_optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, nesterov=False,
                                       weight_decay=5e-4)
-    scheduler = MultiStepLR(model_optimizer, milestones=[60, 90], gamma=0.1)
-else:
-    model_optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate, momentum=0.9, nesterov=False,
-                                      weight_decay=5e-4)
-    scheduler = MultiStepLR(model_optimizer, milestones=[150, 225], gamma=0.1)
+scheduler = MultiStepLR(model_optimizer, milestones=[150, 225], gamma=0.1)
+
 # Initialize dictionary to save statistics for every example presentation
 example_stats = {}
 logger.info('Epoch \t lr \t Time \t TrainLoss \t TrainACC \t TestLoss \t TestACC')
@@ -244,8 +240,8 @@ example_original_order, forget_stats,  train_target = sort_examples_by_forgettin
 
 stats_forget = {}
 stats_forget['forget'] = forget_stats
-stats_forget['class'] = train_target
 stats_forget['res'] = example_stats['res']
+stats_forget['class'] = train_target
 stats_forget['original_index'] = example_original_order
 fname = os.path.join(args.output_dir, 'stats_forget_seed_{}.pkl'.format(args.seed))
 with open(fname, "wb") as f:
