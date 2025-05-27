@@ -1,4 +1,6 @@
 import argparse
+from tabnanny import check
+
 import numpy as np
 import time
 import os
@@ -14,6 +16,7 @@ import logging
 from cifar_resnet import ResNet18, ResNet50, ResNet34
 from utils import *
 from PIL import Image
+import torchvision.models as models
 
 def train_step(model, criterion, optimizer, data_loader):
     model.train()
@@ -69,10 +72,11 @@ def attach_index(path, index, suffix=""):
     return f"{prefix}_{index}{suffix}"
 
 parser = argparse.ArgumentParser(description='Evaluate backdoor attack with different selection methods')
-parser.add_argument('--model', default='resnet34', choices=['resnet18', 'resnet50', 'resnet34'])
-parser.add_argument('--selection', default='res', choices=['random', 'loss', 'grad', 'forget', 'res'])
-parser.add_argument('--res_sel', default='square', choices=['max', 'exp', 'linear', 'log', 'square', 'num', 'third'])
-parser.add_argument('--batch_size', type=int, default=128, help='input batch size for training (default: 128)')
+parser.add_argument('--model', default='AlexNet', choices=['resnet18', 'resnet50', 'resnet34', 'AlexNet', 'SqueezeNet', 'VGG16', 'GoogLeNet', 'DenseNet121', 'MobileNet'])
+parser.add_argument('--selection', default='stealth', choices=['random', 'loss', 'grad', 'forget', 'res', 'stealth'])
+parser.add_argument('--res_sel', default='square', choices=['max', 'exp', 'linear', 'log', 'square', 'num', 'third', 'fre'])
+parser.add_argument('--batch_size', type=int, default=512
+                    , help='input batch size for training (default: 128)')
 parser.add_argument('--epochs', type=int, default=600, help='number of epochs to train (default: 200)')
 parser.add_argument('--learning_rate', type=float, default=0.1, help='learning rate')
 parser.add_argument('--seed', type=int, default=1, help='random seed (default: 1)')
@@ -84,7 +88,10 @@ parser.add_argument('--dataset', default='cifar10', help='dataset')
 parser.add_argument('--num_levels', type=str, default="36:60:12")
 parser.add_argument('--poison_rate', type=float, default=0.001)
 parser.add_argument('--res_rate', type=float, default=1)
-parser.add_argument('--backdoor_type', default='blend', choices=['badnets', 'blend', 'quantize'])
+parser.add_argument('--type', type=str, default="2:2:4")
+parser.add_argument('--comb', type=float, default="0", help='stealh : selected sample')
+parser.add_argument('--backdoor_type', default='wzx', choices=['badnets', 'blend', 'quantize', 'wzx'])
+parser.add_argument('--wzx_num', type=int, default=6)
 parser.add_argument('--select_epoch', type=int, default=10, help='epoch which to calculate the stats')
 parser.add_argument('--num_classes', type=int, default=10, help='num of the classes')
 parser.add_argument('--blend_size', type=int, default=32, help='the size of blend image')
@@ -130,9 +137,10 @@ else :
     test_dataset = datasets.ImageFolder(root=os.path.join(args.data_dir, 'val'), transform=transforms.ToTensor())
 
 if args.backdoor_type == 'badnets':
-    checkboard = torch.Tensor([[0,0,1],[0,1,0],[1,0,1]]).repeat((3,1,1))
-    trigger = torch.zeros([3, 32, 32])
-    trigger[:, 26:29, 17:20] = checkboard
+    checkboards = {}
+    checkboards[0] = torch.Tensor([[0,0,1],[0,1,0],[1,0,1]]).repeat((3,1,1))
+    checkboards[1] = torch.Tensor([[0, 0, 0], [0, 0, 0], [0, 0, 0]]).repeat((3, 1, 1))
+    checkboards[2] = torch.Tensor([[1, 1, 1], [1, 1, 1], [1, 1, 1]]).repeat((3, 1, 1))
     trigger_alpha = torch.zeros([3, 32, 32])
     trigger_alpha[:, 26:29, 17:20] = 1.0
 elif args.backdoor_type == 'blend':
@@ -146,19 +154,28 @@ elif args.backdoor_type == 'blend':
     trigger_m = trigger_m.type(torch.FloatTensor)
     trigger= torch.zeros([3, 32, 32])
     trigger[:, 32 - args.blend_size:32, 32 - args.blend_size:32] = trigger_m
-    trigger_alpha = torch.zeros([3, 32, 32])
-    trigger_alpha[:, 32 - args.blend_size:32, 32 - args.blend_size:32] = 1.0
-    if args.blend_size > 24:
+    '''if args.blend_size > 24:
         trigger_alpha *= 0.2
     elif args.blend_size > 16:
         trigger_alpha *= 0.4
     elif args.blend_size > 8:
         trigger_alpha *= 0.8
     else:
-        trigger_alpha *= 1
+        trigger_alpha *= 1'''
+elif args.backdoor_type == 'wzx':
+    image_path = '/home/boot/STU/workspaces/wzx/bench/resource/blended/hello_kitty.jpeg'  # 替换为你的JPEG图片路径
+    image = Image.open(image_path).convert('RGB')
+    resized_image = image.resize((args.blend_size, args.blend_size), Image.ANTIALIAS)
+    trigger_m = np.array(resized_image)
+    trigger_m = torch.from_numpy(trigger_m)
+    trigger_m = np.transpose(trigger_m, (2, 0, 1))
+    trigger_m = trigger_m/255
+    trigger_m = trigger_m.type(torch.FloatTensor)
+    trigger= torch.zeros([3, 32, 32])
+    trigger[:, 32 - args.blend_size:32, 32 - args.blend_size:32] = trigger_m
 
 #total_poison = int(len(train_dataset) * args.poison_rate)
-if args.selection in ['loss', 'grad', 'forget', 'res']:
+if args.selection in ['loss', 'grad', 'forget', 'res', 'stealth']:
     stats_metric, stats_class, stats_inds = get_stats(args.selection, args.output_dir, args.select_epoch, args.seed, num_classes, args.y_target, args.res_sel, args.res_rate)
     metric_vals, metric_inds = [], []
     #只投毒了target-label数据
@@ -168,13 +185,14 @@ if args.selection in ['loss', 'grad', 'forget', 'res']:
             metric_inds.append(stats_inds[i])
     #largest_inds = heapq.nlargest(total_poison, range(len(metric_vals)), metric_vals.__getitem__)
     total_poison = int(len(train_dataset) * args.poison_rate)
-    largest_inds = heapq.nlargest(total_poison, range(len(metric_vals)), metric_vals.__getitem__)
-    poison_inds = [metric_inds[i] for i in largest_inds]
+    if args.selection != 'stealth':
+        largest_inds = heapq.nlargest(total_poison, range(len(metric_vals)), metric_vals.__getitem__)
+        poison_inds = [metric_inds[i] for i in largest_inds]
 else:
     shuffle = np.random.permutation(len(train_dataset))
     k = 0
     poison_inds = []
-    total_poison = 500 * args.poison_rate
+    total_poison = len(train_dataset) * args.poison_rate
     for i in shuffle:
         if train_dataset[i][1] == args.y_target and k < total_poison:
             poison_inds.append(i)
@@ -182,9 +200,21 @@ else:
 if args.backdoor_type == 'quantize':
     poison_train_set = Add_Clean_Label_Train_Trigger_Quantize(train_dataset, args.y_target, poison_inds, args.num_levels)
     poison_test_set = Add_Test_Trigger_Quantize(test_dataset, args.y_target, args.num_levels)
-else:
-    poison_train_set = Add_Clean_Label_Train_Trigger(train_dataset, trigger, args.y_target, trigger_alpha, poison_inds)
-    poison_test_set = Add_Test_Trigger(test_dataset, trigger, args.y_target, trigger_alpha)
+elif args.backdoor_type == 'badnets':
+    if args.selection != 'stealth':
+        poison_train_set = Add_Clean_Label_Train_Trigger_badnets(train_dataset, checkboards, args.y_target, trigger_alpha, poison_inds, args.type, args.comb)
+    else:
+        poison_train_set = Add_Clean_Label_Train_Trigger_badnets_stealth(train_dataset, checkboards, args.y_target,
+                                                                 trigger_alpha, metric_inds, args.type, total_poison)
+    poison_test_set = Add_Test_Trigger_badnets(test_dataset, checkboards, args.y_target, trigger_alpha, args.type)
+elif args.backdoor_type == 'blend':
+    if args.selection != 'stealth':
+        poison_train_set = Add_Clean_Label_Train_Trigger_blend(train_dataset, trigger, args.y_target,
+                                                             poison_inds, args.type, args.comb)
+    else:
+        poison_train_set = Add_Clean_Label_Train_Trigger_blend_stealth(train_dataset, trigger, args.y_target,
+                                                               metric_inds, args.type, total_poison)
+    poison_test_set = Add_Test_Trigger_blend(test_dataset, trigger, args.y_target, args.type)
 poison_train_set = MyDataset(poison_train_set, train_transform)
 train_loader = DataLoader(poison_train_set, batch_size=args.batch_size, shuffle=True, num_workers=4)
 test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
@@ -196,6 +226,24 @@ elif args.model == 'resnet50':
     model = ResNet50(num_classes=num_classes)
 elif args.model == 'resnet34':
     model = ResNet34(num_classes=num_classes)
+elif args.model == 'AlexNet':
+    from models.AlexNet import *
+    model = AlexNet()
+elif args.model == "SqueezeNet":
+    from models.SqueezeNet import *
+    model = SqueezeNet()
+elif args.model == "VGG16":
+    from models.VGG16 import *
+    model = VGG16()
+elif args.model == "GoogLeNet":
+    from models.GoogLeNet import *
+    model = GoogLeNet()
+elif args.model == "DenseNet121":
+    from models.DenseNet import *
+    model = DenseNet121()
+elif args.model == "MobileNet":
+    from models.MobileNet import *
+    model = MobileNet()
 model = model.cuda()
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 criterion = torch.nn.CrossEntropyLoss().to(device)
